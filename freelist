@@ -1,0 +1,26 @@
+CREATE OR REPLACE FUNCTION ipUnfree() RETURNS trigger AS $$
+
+    my $ip_addr=($_TD->{new}{ip_addr});
+    my $sql="DELETE FROM dns.ipfreelist WHERE ip_addr='%s';";
+
+    my $rv = spi_exec_query( sprintf($sql, $ip_addr));
+
+    return ;
+
+$$ LANGUAGE plperl;
+
+CREATE OR REPLACE FUNCTION ipFree() RETURNS trigger AS $$
+
+    my $ip_addr=($_TD->{old}{ip_addr});
+    my $ssql="SELECT count(*) AS count FROM dns.ipname WHERE ip_addr='%s';";
+    my $isql="INSERT INTO  dns.ipfreelist (ip_addr, source, sourcedate ) 
+                                   VALUES ('%s',  'ipfree', 'now')";
+
+    my $rv = spi_exec_query( sprintf($ssql, $ip_addr));
+    if (1 == $rv->{rows}[0]->{count}) {
+        my $rv = spi_exec_query( sprintf($isql, $ip_addr));
+    }
+
+    return ;
+
+$$ LANGUAGE plperl;

@@ -1,0 +1,150 @@
+CREATE OR REPLACE FUNCTION getjackid (varchar, varchar, varchar)
+       RETURNS integer LANGUAGE plperl AS '
+
+    my $label = $_[0];
+    my $bldg  = $_[1];
+    my $room  = $_[2];
+
+
+##SQirLies:
+my $cq = "SELECT DISTINCT closet FROM closets WHERE ";
+my $cqb= sprintf(" bldg=\'%s\' ", $bldg);
+my $cqr= sprintf(" \'%s\' ~ roomre ", $room);
+
+my $jq = "SELECT jackid FROM jack WHERE ";
+my $jql= sprintf("label=\'%s\' ", uc($label));
+my $jqb= sprintf("bldg=\'%s\' ", $bldg);
+my $jqr= sprintf("( room=\'%s\' OR room IS NULL )", uc($room));
+
+#secret global debug string;
+$debug="";
+
+
+
+##Check jack, without closet lookup
+if ($label && $room && $bldg) {
+	my $sql=join(" ", $jq , $jql , "AND" , $jqb , "AND" , $jqr , ";");
+	$debug .= $sql . "\n";
+	my $rv = spi_exec_query( $sql);
+	if ( 1== $rv->{processed} ) {
+		return $rv->{rows}[0]->{jackid};
+	}
+} elsif ( $label && $bldg ) {
+	my $sql= join(" ",$jq , $jql , "AND" , $jqb , ";");
+	$debug .= $sql . "\n";
+	my $rv = spi_exec_query($sql);
+	if ( 1== $rv->{processed} ) {
+		return $rv->{rows}[0]->{jackid};
+	}
+} elsif ($label && $room ) {
+	my $sql= join(" ",$jq , $jql , "AND" , $jqr , ";");
+	$debug .= $sql . "\n";
+	my $rv = spi_exec_query($sql);
+	if ( 1== $rv->{processed} ) {
+		return $rv->{rows}[0]->{jackid};
+	}
+} elsif ($label) {
+	my $sql= join(" ",$jq , $jql , ";");
+	$debug .= $sql . "\n";
+	my $rv = spi_exec_query($sql);
+	if ( 1== $rv->{processed} ) {
+		return $rv->{rows}[0]->{jackid};
+	}
+}
+
+
+my $plausable=1;
+my $insertable=0;
+my $n;
+my $closet;
+
+uc($label)=~ /^(.*?)([0-9]+)$/;
+my $context=$1;
+my $serial=$2;
+
+if ($context=~
+         /^([1-9]?[A-KMSW]+?|[-0-9UL]{2,5}?[A-Z]?)?([-._]?)([DV]-?)?$/){
+	my $prefix=$1;   # Indicates which closet (generally) or room number.
+	my $sep=$2;      # A seperator
+	my $type=$3;     # D(ata) or V(oice)
+	#my $serial=$4;   # numeric part
+
+	
+
+	#more SQuerLies:
+	my $cqs= sprintf(" (smin <= %i) AND (%i <= smax) ", $serial, $serial);
+	my $cqp= sprintf(" \'%s\' ~ (\'^\'|| prefix) ", $prefix );
+
+	my $sq = "SELECT jackid from jack WHERE label ~ ANY ( SELECT "
+	       .sprintf( "( \'^\'||prefix||sep||type||\'0*%i\\$\' ) ", $serial)
+	       ."FROM closets WHERE";
+
+	my $sqt= sprintf(" type=\'%s\' ", $type);
+	       
+
+
+	my $sql= join(" ", $cq , $cqb ,"AND", $cqr ,"AND", $cqp ,";");
+	$debug .= $sql . "\n";
+	my $rv = spi_exec_query($sql);
+	if ( 1==$rv->{processed} ) {
+		$closet=$rv->{rows}[0]->{closet};
+		$insertable=1;
+	} else {
+	  my $rv = spi_exec_query($cq . $cqb ."AND". $cqr .";");
+	  if ( 1==$rv->{processed} ) {
+		  $closet=$rv->{rows}[0]->{closet};
+	  } else {
+	    my $rv = spi_exec_query($cq . $cqb ."AND". $cqp .";");
+	    if ( 1==$rv->{processed} ) {
+		    $closet=$rv->{rows}[0]->{closet};
+	    } else {
+	      my $rv = spi_exec_query($cq . $cqr ."AND". $cqp .";");
+	      if ( 1==$rv->{processed} ) {
+		      $closet=$rv->{rows}[0]->{closet};
+	      } else {
+	        my $rv = spi_exec_query($cq . $cqp .";");
+	        if ( 1==$rv->{processed} ) {
+		        $closet=$rv->{rows}[0]->{closet};
+	          } else {
+		          return undef;
+	        }
+	      }
+	    }
+	  }
+	}
+
+	my $sqc= sprintf(" closet=\'%s\' ", $closet);
+
+	my $sql= join(" ",$sq , $sqc ,"AND", $cqs ,")", "AND", $sqc ,";");
+	$debug .= $sql . "\n";
+	my $rv = spi_exec_query($sql); 
+	if ( 1==$rv->{processed} ) {
+		return $rv->{rows}[0]->{jackid};
+	}
+	if ( 1<$rv->{processed} ) {
+		# Try to disambiguate with Type
+		my $sql= join(" ",$sq , $sqc ,"AND", $cqs , "AND", $sqt, ")", 
+				"AND", $sqc , ";");
+		$debug .= $sql . "\n";
+		my $rv = spi_exec_query($sql); 
+		if ( 1==$rv->{processed} ) {
+			return $rv->{rows}[0]->{jackid};
+		}
+		# Try to disambiguate with room number
+		my $sql= join(" ",$sq , $sqc ,"AND", $cqs ,")", 
+				"AND", $sqc , "AND", $jqr , ";");
+		$debug .= $sql . "\n";
+		my $rv = spi_exec_query($sql); 
+		if ( 1==$rv->{processed} ) {
+			return $rv->{rows}[0]->{jackid};
+		}
+		return undef;
+	}
+	# insert insert code here
+	return 0;  #place holder for plausable, but not inserted
+	
+}  else {
+	return undef;
+}
+
+';

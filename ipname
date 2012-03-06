@@ -1,0 +1,117 @@
+ipname
+	name ip PTR A source sourcedate
+
+
+CREATE TABLE ipname (
+	name varchar NOT NULL,
+	ip_addr inet NOT NULL,
+	ptr boolean DEFAULT true,
+	a boolean DEFAULT true,
+	source varchar DEFAULT "current_user"(),
+	sourcedate timestamp DEFAULT now()
+);
+
+
+xzone
+	zone name type data source sourcedate
+
+CREATE TABLE xzone (
+	zone varchar NOT NULL,
+	name varchar NOT NULL,
+	type varchar NOT NULL,
+	data varchar NOT NULL,
+	source varchar DEFAULT "current_user"(),
+	sourcedate timestamp DEFAULT now()
+);
+	
+
+ipfreelist
+	ip source sourcedate
+
+CREATE TABLE ipfreelist (
+	ip_addr inet PRIMARY KEY,
+	source varchar,
+	sourcedate timestamp
+);
+
+soa
+	zone zttl hostmaster mail serial refresh retry expire nttl touched
+
+CREATE TABLE soa (
+	zone varchar PRIMARY KEY,
+	zttl integer,
+	hostmaster varchar,
+	mail varchar,
+	serial integer,
+	refresh integer,
+	retry integer,
+	expire integer,
+	nttl integer,
+	touched boolean
+)
+
+
+CREATE OR REPLACE FUNCTION zonetouch() RETURNS trigger AS $$
+    #my $sql="UPDATE dns.soa SET touched=true WHERE zone='%s';";
+
+    my $sql='UPDATE dns.soa SET touched=true WHERE zone IN (
+             SELECT zone from dns.soa WHERE zone=$1 UNION
+             SELECT zone from dns.zonealias WHERE alias=$1);';
+
+    my $plan = spi_prepare($sql, 'varchar');
+    my $old=($_TD->{old}{name});
+    my $new=($_TD->{new}{name});
+
+   
+    my $rv=spi_exec_prepared($plan, $old);
+    my $rv=spi_exec_prepared($plan, $new);
+
+    $old =~ s/^.*?\.//;
+    $new =~ s/^.*?\.//;
+    my $rv=spi_exec_prepared($plan, $old);
+    my $rv=spi_exec_prepared($plan, $new);
+
+    $old =~ s/^.*?\.//;
+    $new =~ s/^.*?\.//;
+    my $rv=spi_exec_prepared($plan, $old);
+    my $rv=spi_exec_prepared($plan, $new);
+
+    spi_freeplan($plan);
+
+    return ;
+$$ LANGUAGE plperl;
+
+
+CREATE OR REPLACE FUNCTION rzonetouch() RETURNS trigger AS $$
+    my $sql= "UPDATE dns.soa SET touched=true WHERE zone='%s';";
+    my $rv;
+
+    foreach my $ip ($_TD->{new}{ip_addr}, $_TD->{old}{ip_addr}) {
+
+      if ( $ip =~ /(\d+)\.(\d+)\.(\d+)\.(\d+)/ ) {
+	my $zone = "$3.$2.$1.in-addr.arpa";
+	$rv = spi_exec_query( sprintf($sql, $zone));
+      } else { 
+        # IPv6
+	my $zone = "ip6.arpa";
+	my @ip = split /:/, $ip;
+	while ( @ip ) {
+	  my $x =hex shift @ip;
+
+	  $zone = sprintf ("%x.%x.%x.%x.%s",
+		($x & 0xf),
+		(($x>>4) & 0xf),
+		(($x>>8) & 0xf),
+		(($x>>12) & 0xf), $zone);
+
+	}
+	my $nrows=0;
+	while ((0 == $nrows) && ($zone =~ /^.\./) ) {
+	  $rv = spi_exec_query(sprintf($sql,$zone));
+	  $nrows += $rv->{processed};
+	  $zone =~ s/^.\.//;
+	}
+      }
+    }
+    return ;
+$$ LANGUAGE plperl;

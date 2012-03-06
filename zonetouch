@@ -1,0 +1,32 @@
+#my $sql="UPDATE dns.soa SET touched=true WHERE zone='%s';";   
+                                                                
+my $sql='UPDATE dns.soa SET touched=true WHERE zone IN (       
+          SELECT zone from dns.soa WHERE zone=$1 UNION          
+          SELECT zone from dns.zonealias WHERE alias=$1);';     
+                                                                
+my $plan = spi_prepare($sql, 'varchar');                       
+my $old=($_TD->{old}{name});                                   
+my $new=($_TD->{new}{name});                                   
+                                                                
+                                                                
+#For zone.pdx.edu
+my $rv=spi_exec_prepared($plan, $old);                         
+my $rv=spi_exec_prepared($plan, $new);                         
+                                                                
+# For machinename.zone.pdx.edu
+$old =~ s/^.*?\.//;                                            
+$new =~ s/^.*?\.//;                                            
+my $rv=spi_exec_prepared($plan, $old);                         
+my $rv=spi_exec_prepared($plan, $new);                         
+
+# To get stuff like www.ortsda.cecs.pdx.edu
+$old =~ s/^.*?\.//;                                            
+$new =~ s/^.*?\.//;                                            
+my $rv=spi_exec_prepared($plan, $old);                         
+my $rv=spi_exec_prepared($plan, $new);                         
+                                                                
+spi_freeplan($plan);                                           
+                                                                
+return ;                                                       
+                                                                
+

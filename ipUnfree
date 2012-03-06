@@ -1,0 +1,10 @@
+CREATE OR REPLACE FUNCTION ipUnFree() RETURNS trigger AS $$
+
+    my $sql="DELETE FROM dns.ipfreelist WHERE ipaddr='%s';";
+
+    my $ip_addr=($_TD->{new}{ip_addr});
+    my $rv = spi_exec_query( sprintf($sql, $ip_addr));
+
+    return ;
+
+$$ LANGUAGE plperl;
